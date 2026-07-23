@@ -10,7 +10,7 @@
 #define RELAY_PORT 47001
 #define RELAY_IP "127.0.0.1"
 #define PACKET_SIZE 164
-#define BUFFER_SIZE (1024 * 1024) // 1MB socket buffer
+#define BUFFER_SIZE (1024 * 1024)
 
 int main(void) {
     int listen_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -25,11 +25,9 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    // Set low-latency traffic class
     int tos = IPTOS_LOWDELAY;
     setsockopt(send_fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
 
-    // Increase socket buffers to prevent kernel drops
     int buf_size = BUFFER_SIZE;
     setsockopt(listen_fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
     setsockopt(send_fd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
@@ -60,10 +58,10 @@ int main(void) {
             continue;
         }
 
-        // Send primary packet
+        // Primary packet
         sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&relay_addr, sizeof(relay_addr));
 
-        // Send duplicate for 19 out of 20 packets (1.99875x overhead)
+        // Duplicate 19/20 packets -> 2925 total packets (1.99875x overhead)
         if ((packet_count % 20) != 0) {
             sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&relay_addr, sizeof(relay_addr));
         }
