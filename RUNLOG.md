@@ -18,3 +18,8 @@
   - Miss Rate: 0.73% (11 misses)
   - Overhead: 1.99x
   - Result: **VALID**
+
+- **Profile B (`profiles/B.json`, Delay: 80ms)**:
+  - Miss Rate: 1.00% (15 misses)
+  - Overhead: 1.99x
+  - Result: **VALID**
