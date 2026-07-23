@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <netinet/ip.h>
 #include <sys/socket.h>
 #include <stdint.h>
 
@@ -11,8 +12,8 @@
 #define PLAYER_IP "127.0.0.1"
 #define PACKET_SIZE 164
 #define MAX_SEQ_NUMBERS 1048576
+#define BUFFER_SIZE (1024 * 1024) // 1MB socket buffer
 
-// 128KB Bitset to track seen sequence numbers up to 1,048,576
 static uint8_t seen_bitset[MAX_SEQ_NUMBERS / 8];
 
 static inline int is_seen(uint32_t seq) {
@@ -35,6 +36,21 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
+    int send_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_fd < 0) {
+        perror("socket send");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set low-latency traffic class
+    int tos = IPTOS_LOWDELAY;
+    setsockopt(send_fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
+
+    // Increase socket buffers to prevent kernel drops
+    int buf_size = BUFFER_SIZE;
+    setsockopt(listen_fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+    setsockopt(send_fd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+
     struct sockaddr_in listen_addr;
     memset(&listen_addr, 0, sizeof(listen_addr));
     listen_addr.sin_family = AF_INET;
@@ -43,12 +59,6 @@ int main(void) {
 
     if (bind(listen_fd, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0) {
         perror("bind listen");
-        exit(EXIT_FAILURE);
-    }
-
-    int send_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (send_fd < 0) {
-        perror("socket send");
         exit(EXIT_FAILURE);
     }
 
@@ -66,13 +76,11 @@ int main(void) {
             continue;
         }
 
-        // Extract sequence number (Big-Endian uint32)
         uint32_t seq = ((uint32_t)buffer[0] << 24) |
                        ((uint32_t)buffer[1] << 16) |
                        ((uint32_t)buffer[2] << 8)  |
                        ((uint32_t)buffer[3]);
 
-        // Duplicate suppression: process only the first arrival
         if (!is_seen(seq)) {
             mark_seen(seq);
             sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&player_addr, sizeof(player_addr));

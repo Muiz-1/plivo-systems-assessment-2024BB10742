@@ -36,3 +36,11 @@
   - Miss Rate: 0.87% (13 misses)
   - Overhead: 2.00x
   - Result: **VALID**
+
+---
+
+## Iteration 3: Socket Buffer & Low-Latency Tuning
+- **Profile B (`profiles/B.json`, Delay: 80ms)**:
+  - Miss Rate: 1.00% (15 misses)
+  - Overhead: 2.00x
+  - Result: **VALID** (At exact cap limit)
