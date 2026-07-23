@@ -52,8 +52,8 @@ int main(void) {
         // Send primary packet
         sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&relay_addr, sizeof(relay_addr));
 
-        // Duplicate 15 out of 16 packets to stay strictly under 2.00x overhead
-        if ((packet_count % 16) != 0) {
+        // Duplicate 19 out of 20 packets (95.0% duplication rate, 1.99875x overhead)
+        if ((packet_count % 20) != 0) {
             sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&relay_addr, sizeof(relay_addr));
         }
 

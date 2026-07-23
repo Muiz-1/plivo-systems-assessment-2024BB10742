@@ -23,3 +23,11 @@
   - Miss Rate: 1.00% (15 misses)
   - Overhead: 1.99x
   - Result: **VALID**
+
+---
+
+## Iteration 2: Max-Density Duplication (19/20 Packets)
+- **Profile B (`profiles/B.json`, Delay: 85ms)**:
+  - Miss Rate: 0.80% (12 misses)
+  - Overhead: 2.00x
+  - Result: **VALID**
