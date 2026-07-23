@@ -1,50 +1,66 @@
-/* BASELINE SENDER (C) — naive on purpose. Rewrite it (C, C++, Go, or Rust).
- *
- * Ports (all 127.0.0.1):
- *   bind 47010  <- harness source delivers frame i here at t0 + i*20ms
- *                  (format: 4-byte big-endian seq + 160-byte payload)
- *   send 47001  -> relay uplink toward the receiver (YOUR wire format)
- *   bind 47004  <- feedback from your receiver, via the relay (optional)
- *
- * This baseline forwards each frame once, unchanged, and ignores feedback.
- * No redundancy, no retransmission. It cannot pass. That is the point.
- *
- * Env vars available if you want them: T0 (epoch seconds, float),
- * DURATION_S, DELAY_MS. The harness kills this process when the run ends,
- * so a forever-loop is fine.
- *
- * build: make        run: python3 run.py --delay_ms 60
- */
-#include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+#define LISTEN_PORT 47010
+#define RELAY_PORT 47001
+#define RELAY_IP "127.0.0.1"
+#define PACKET_SIZE 164
 
 int main(void) {
-    int in_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in in_addr = {0};
-    in_addr.sin_family = AF_INET;
-    in_addr.sin_port = htons(47010);
-    in_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if (bind(in_fd, (struct sockaddr *)&in_addr, sizeof in_addr) < 0) {
-        perror("bind 47010");
-        return 1;
+    int listen_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (listen_fd < 0) {
+        perror("socket listen");
+        exit(EXIT_FAILURE);
     }
 
-    int out_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in relay = {0};
-    relay.sin_family = AF_INET;
-    relay.sin_port = htons(47001);
-    relay.sin_addr.s_addr = inet_addr("127.0.0.1");
+    struct sockaddr_in listen_addr;
+    memset(&listen_addr, 0, sizeof(listen_addr));
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_port = htons(LISTEN_PORT);
+    listen_addr.sin_addr.s_addr = INADDR_ANY;
 
-    unsigned char buf[2048];
-    for (;;) {
-        ssize_t n = recvfrom(in_fd, buf, sizeof buf, 0, NULL, NULL);
-        if (n <= 0) continue;
-        /* your protocol design goes here; baseline = send once, as-is */
-        sendto(out_fd, buf, (size_t)n, 0, (struct sockaddr *)&relay,
-               sizeof relay);
+    if (bind(listen_fd, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0) {
+        perror("bind listen");
+        exit(EXIT_FAILURE);
     }
+
+    int send_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_fd < 0) {
+        perror("socket send");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr_in relay_addr;
+    memset(&relay_addr, 0, sizeof(relay_addr));
+    relay_addr.sin_family = AF_INET;
+    relay_addr.sin_port = htons(RELAY_PORT);
+    inet_pton(AF_INET, RELAY_IP, &relay_addr.sin_addr);
+
+    unsigned char buffer[PACKET_SIZE];
+    unsigned long packet_count = 0;
+
+    while (1) {
+        ssize_t bytes_read = recv(listen_fd, buffer, sizeof(buffer), 0);
+        if (bytes_read <= 0) {
+            continue;
+        }
+
+        // Send primary packet
+        sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&relay_addr, sizeof(relay_addr));
+
+        // Duplicate 15 out of 16 packets to stay strictly under 2.00x overhead
+        if ((packet_count % 16) != 0) {
+            sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&relay_addr, sizeof(relay_addr));
+        }
+
+        packet_count++;
+    }
+
+    close(listen_fd);
+    close(send_fd);
     return 0;
 }

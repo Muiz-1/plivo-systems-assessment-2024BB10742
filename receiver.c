@@ -1,49 +1,85 @@
-/* BASELINE RECEIVER (C) — naive on purpose. Rewrite it (C, C++, Go, or Rust).
- *
- * Ports (all 127.0.0.1):
- *   bind 47002  <- media from your sender, via the hostile relay
- *   send 47020  -> harness player. MUST be: 4-byte big-endian seq +
- *                  160-byte payload. Frame i counts only if it arrives
- *                  BEFORE its deadline t0 + DELAY_MS + i*20ms.
- *   send 47003  -> feedback to your sender, via the relay (optional)
- *
- * This baseline forwards whatever arrives straight to the player: lost
- * frames stay lost, late frames stay late, duplicates are re-sent
- * harmlessly. All yours to fix — jitter buffer, reordering, recovery.
- *
- * Env vars available: T0, DURATION_S, DELAY_MS. Harness kills the process
- * at run end; a forever-loop is fine.
- */
-#include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <stdint.h>
+
+#define LISTEN_PORT 47002
+#define PLAYER_PORT 47020
+#define PLAYER_IP "127.0.0.1"
+#define PACKET_SIZE 164
+#define MAX_SEQ_NUMBERS 1048576
+
+// 128KB Bitset to track seen sequence numbers up to 1,048,576
+static uint8_t seen_bitset[MAX_SEQ_NUMBERS / 8];
+
+static inline int is_seen(uint32_t seq) {
+    if (seq >= MAX_SEQ_NUMBERS) return 0;
+    return (seen_bitset[seq / 8] & (1 << (seq % 8))) != 0;
+}
+
+static inline void mark_seen(uint32_t seq) {
+    if (seq < MAX_SEQ_NUMBERS) {
+        seen_bitset[seq / 8] |= (1 << (seq % 8));
+    }
+}
 
 int main(void) {
-    int in_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in in_addr = {0};
-    in_addr.sin_family = AF_INET;
-    in_addr.sin_port = htons(47002);
-    in_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if (bind(in_fd, (struct sockaddr *)&in_addr, sizeof in_addr) < 0) {
-        perror("bind 47002");
-        return 1;
+    memset(seen_bitset, 0, sizeof(seen_bitset));
+
+    int listen_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (listen_fd < 0) {
+        perror("socket listen");
+        exit(EXIT_FAILURE);
     }
 
-    int out_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in player = {0};
-    player.sin_family = AF_INET;
-    player.sin_port = htons(47020);
-    player.sin_addr.s_addr = inet_addr("127.0.0.1");
+    struct sockaddr_in listen_addr;
+    memset(&listen_addr, 0, sizeof(listen_addr));
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_port = htons(LISTEN_PORT);
+    listen_addr.sin_addr.s_addr = INADDR_ANY;
 
-    unsigned char buf[2048];
-    for (;;) {
-        ssize_t n = recvfrom(in_fd, buf, sizeof buf, 0, NULL, NULL);
-        if (n <= 0) continue;
-        /* jitter buffer / reorder / recovery logic goes here */
-        sendto(out_fd, buf, (size_t)n, 0, (struct sockaddr *)&player,
-               sizeof player);
+    if (bind(listen_fd, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0) {
+        perror("bind listen");
+        exit(EXIT_FAILURE);
     }
+
+    int send_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_fd < 0) {
+        perror("socket send");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr_in player_addr;
+    memset(&player_addr, 0, sizeof(player_addr));
+    player_addr.sin_family = AF_INET;
+    player_addr.sin_port = htons(PLAYER_PORT);
+    inet_pton(AF_INET, PLAYER_IP, &player_addr.sin_addr);
+
+    unsigned char buffer[PACKET_SIZE];
+
+    while (1) {
+        ssize_t bytes_read = recv(listen_fd, buffer, sizeof(buffer), 0);
+        if (bytes_read < 4) {
+            continue;
+        }
+
+        // Extract sequence number (Big-Endian uint32)
+        uint32_t seq = ((uint32_t)buffer[0] << 24) |
+                       ((uint32_t)buffer[1] << 16) |
+                       ((uint32_t)buffer[2] << 8)  |
+                       ((uint32_t)buffer[3]);
+
+        // Duplicate suppression: process only the first arrival
+        if (!is_seen(seq)) {
+            mark_seen(seq);
+            sendto(send_fd, buffer, bytes_read, 0, (struct sockaddr *)&player_addr, sizeof(player_addr));
+        }
+    }
+
+    close(listen_fd);
+    close(send_fd);
     return 0;
 }
