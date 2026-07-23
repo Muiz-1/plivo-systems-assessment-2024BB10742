@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>UDP Streaming Optimization Summary</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #222; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+        h1 { border-bottom: 2px solid #0056b3; padding-bottom: 8px; color: #0056b3; }
+        h2 { margin-top: 30px; color: #333; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f4f6f8; }
+        .valid { color: #28a745; font-weight: bold; }
+        .code { background: #f8f9fa; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+        .box { background: #eef6ff; border-left: 4px solid #0056b3; padding: 12px 16px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+    <h1>UDP Streaming Protocol Optimization Summary</h1>
+
+    <div class="box">
+        <strong>Key Outcome:</strong> Successfully reduced playout delay down to <strong>40 ms</strong> on Profile A and <strong>85 ms</strong> on Profile B while maintaining a deadline miss rate below <strong>1.00%</strong> and strictly adhering to the <strong>2.00x bandwidth overhead cap</strong>.
+    </div>
+
+    <h2>1. Final Benchmark Performance</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Profile</th>
+                <th>Playout Delay</th>
+                <th>Deadline Misses</th>
+                <th>Miss Rate</th>
+                <th>Bandwidth Overhead</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Profile A</strong> (<span class="code">profiles/A.json</span>)</td>
+                <td>40 ms</td>
+                <td>13 / 1500</td>
+                <td>0.87%</td>
+                <td>2.00x (479,700 B)</td>
+                <td class="valid">VALID</td>
+            </tr>
+            <tr>
+                <td><strong>Profile B</strong> (<span class="code">profiles/B.json</span>)</td>
+                <td>85 ms</td>
+                <td>12 / 1500</td>
+                <td>0.80%</td>
+                <td>2.00x (479,700 B)</td>
+                <td class="valid">VALID</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>2. Key Architectural Decisions</h2>
+    <ul>
+        <li><strong>Precise Packet Budgeting (19/20 Duplication Ratio)</strong>: Transmitting duplicates for 19 out of 20 frames yields exactly 2,925 packets (479,700 bytes), utilizing 99.9% of the allowed 2.00x bandwidth budget (2,926 max packets).</li>
+        <li><strong>Immediate Duplication over Staggered Duplication</strong>: Sending duplicates immediately gives each frame the maximum available time window to traverse the lossy network. Holding duplicates for temporal separation added 20 ms of latency, causing deadline miss spikes.</li>
+        <li><strong>O(1) Sequence De-duplication</strong>: Fast bitset tracking in <span class="code">receiver.c</span> filters duplicate arrivals instantly without dynamic memory allocations or lookup overhead.</li>
+        <li><strong>Socket Ring Buffer Tuning</strong>: Configured 1 MB OS receive/send buffers (<span class="code">SO_RCVBUF</span> / <span class="code">SO_SNDBUF</span>) and low-latency TOS flags to prevent kernel-level packet drops.</li>
+    </ul>
+
+</body>
+</html>
